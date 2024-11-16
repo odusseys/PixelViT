@@ -2,7 +2,8 @@
 import torch
 import torch.nn as nn
 
-Activation = nn.ReLU
+
+Activation = nn.GELU
 NormLayer = nn.BatchNorm2d
 
 class DepthwiseConvolution(nn.Module):
@@ -19,7 +20,7 @@ class DepthwiseConvolution(nn.Module):
 
 class ResidualBlock(nn.Module):
   def __init__(self, out_channels, kernel_size=3, padding=1, depthwise=True, dtype=torch.float32, 
-               padding_mode="replicate", shrinkage=1.0):
+                shrinkage=1.0):
     super().__init__()
     Layer = DepthwiseConvolution if depthwise else nn.Conv2d
     self.layers = nn.Sequential(
@@ -47,7 +48,29 @@ class ProjectionLayer(nn.Module):
   def forward(self, x):
     return self.layers(x)
 
+class FCLayer(nn.Module):
+  def __init__(self,  n_features_in, n_features_out=None, residual=False, bn=True, shrinkage=1.0):
+    super().__init__()
+    if n_features_out is None:
+      n_features_out = n_features_in
+    self.residual = residual if n_features_in == n_features_out else False
+    self.layers = nn.Sequential(
+        nn.Conv2d(n_features_in, n_features_out, 1, bias=not bn),
+        Activation(),
+    )
+    self.shrinkage = shrinkage
+    if bn:
+      self.bn = NormLayer(n_features_out)
+    else:
+      self.bn = None
 
+  def forward(self, f):
+    res = self.layers(f)
+    if self.residual:
+      return f + self.shrinkage * res
+    if self.bn is None:
+      return res
+    return self.bn(res)
 
 class ConvolutionalStage(nn.Module):
   def __init__(self, n_features):
@@ -60,7 +83,10 @@ class ConvolutionalStage(nn.Module):
         ResidualBlock(n_features),
         ResidualBlock(n_features),
         ResidualBlock(n_features),
+        ResidualBlock(n_features),
+        ResidualBlock(n_features),
     )
 
   def forward(self, features, image):
     return self.layers(torch.cat([features, image], dim=1))
+  

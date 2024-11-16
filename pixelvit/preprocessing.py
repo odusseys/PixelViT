@@ -1,7 +1,10 @@
 
 from pytorch_wavelets import DWTForward
 import torch
+from torch import nn
 import torchvision
+import numpy as np
+import math
 
 dwt_cache = {}
 
@@ -26,7 +29,8 @@ def wavelet_decomposition_torch(img, n_wavelets, size):
     del y
   return torch.cat(res, dim=1)
 
-MINIMAL_GRID_SIZE
+MINIMAL_IMAGE_SIZE = 224
+MINIMAL_GRID_SIZE = MINIMAL_IMAGE_SIZE // 14
 
 def make_positional_encodings(batch_size, size, n):
   with torch.no_grad():
@@ -46,10 +50,14 @@ def preprocess_images(dino, images, starting_size, target_size, n_wavelets, n_pe
     factor = starting_size // MINIMAL_GRID_SIZE
 
     images_small = torch.nn.functional.interpolate(images, factor * MINIMAL_IMAGE_SIZE, mode="bilinear", align_corners=False, antialias=True)
+
+    # add noise to minimize positional encoding ViT artifacts
+    images_small = (images_small + torch.randn_like(images_small) * 0.05).clamp(0, 1)
+
     features = dino.get_features_for_tensor(images_small)
 
     images = nn.functional.interpolate(images, (target_size, target_size), mode="bilinear", align_corners=False, antialias=True)
     wavelets = wavelet_decomposition_torch(images, n_wavelets, target_size)
     pe = make_positional_encodings(images.shape[0], target_size, n_pe_frequencies)
-    return features, torch.cat([wavelets, pe], dim=1)
+    return features, images, torch.cat([wavelets, pe], dim=1)
 
